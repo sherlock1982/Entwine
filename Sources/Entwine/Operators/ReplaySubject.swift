@@ -39,6 +39,7 @@ public final class ReplaySubject<Output, Failure: Error> {
     
     private var replayValues: ReplaySubjectValueBuffer<Output>
     private var completion: Subscribers.Completion<Failure>?
+    private let keepReplay: Bool
     
     private var isActive: Bool { completion == nil }
     var subscriptionCount: Int { subscriptions.count }
@@ -47,7 +48,8 @@ public final class ReplaySubject<Output, Failure: Error> {
     /// replay to new subscribers
     /// - Returns: A subject that maintains a buffer of its recent values for replay to new subscribers
     ///  and passes through subsequent values and completion
-    public init(maxBufferSize: Int) {
+    public init(maxBufferSize: Int, keepReplay: Bool) {
+        self.keepReplay = keepReplay
         self.replayValues = .init(maxBufferSize: maxBufferSize)
     }
 }
@@ -81,6 +83,7 @@ extension ReplaySubject: Publisher {
             if let index = self.subscriptions.firstIndex(where: { subscriberIdentifier == $0.subscriberIdentifier }) {
                 self.subscriberIdentifiers.remove(subscriberIdentifier)
                 self.subscriptions.remove(at: index)
+                self.cleanupIfNeeded()
             }
         }
         subscriber.receive(subscription: subscription)
@@ -107,6 +110,16 @@ extension ReplaySubject: Subject {
         self.completion = completion
         subscriptions.forEach { subscription in
             subscription.forwardCompletionToSink(completion)
+        }
+        subscriptions.removeAll()
+        cleanupIfNeeded()
+    }
+    
+    private func cleanupIfNeeded(){
+        if (subscriptions.isEmpty && !keepReplay){
+            status = .active
+            completion = nil
+            replayValues.clear()
         }
     }
 }
@@ -150,12 +163,12 @@ fileprivate final class ReplaySubjectSubscription<Sink: Subscriber>: Subscriptio
 
 extension ReplaySubject {
     
-    public static func createUnbounded() -> ReplaySubject<Output, Failure> {
-        return .init(maxBufferSize: .max)
+    public static func createUnbounded(keepReplay: Bool) -> ReplaySubject<Output, Failure> {
+        return .init(maxBufferSize: .max, keepReplay: keepReplay)
     }
     
-    public static func create(bufferSize: Int) -> ReplaySubject<Output, Failure> {
-        return .init(maxBufferSize: bufferSize)
+    public static func create(bufferSize: Int, keepReplay: Bool) -> ReplaySubject<Output, Failure> {
+        return .init(maxBufferSize: bufferSize, keepReplay: keepReplay)
     }
 }
 
@@ -173,5 +186,9 @@ fileprivate struct ReplaySubjectValueBuffer<Value> {
         if buffer.count > maxBufferSize {
             _ = buffer.dequeue()
         }
+    }
+    
+    mutating func clear(){
+        buffer = LinkedListQueue<Value>()
     }
 }
