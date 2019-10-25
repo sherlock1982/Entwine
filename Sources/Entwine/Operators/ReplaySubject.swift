@@ -39,6 +39,7 @@ public final class ReplaySubject<Output, Failure: Error> {
     private var status = Status.active
     private var subscriptions = [ReplaySubjectSubscription<Sink>]()
     private var subscriberIdentifiers = Set<CombineIdentifier>()
+    private var completion: Subscribers.Completion<Failure>? = nil
     
     private var buffer = [Output]()
     private var replayValues: ReplaySubjectValueBuffer<Output>
@@ -60,7 +61,7 @@ extension ReplaySubject: Publisher {
     
     public func receive<S : Subscriber>(subscriber: S) where Failure == S.Failure, Output == S.Input {
         
-        guard status != .completed, !subscriberIdentifiers.contains(subscriber.combineIdentifier) else {
+        guard !subscriberIdentifiers.contains(subscriber.combineIdentifier) else {
             subscriber.receive(subscription: Subscriptions.empty)
             subscriber.receive(completion: .finished)
             return
@@ -68,6 +69,12 @@ extension ReplaySubject: Publisher {
         
         let subscriberIdentifier = subscriber.combineIdentifier
         let subscription = ReplaySubjectSubscription(sink: AnySubscriber(subscriber), replayedInputs: replayValues.buffer)
+        if let completion = completion {
+            // There's no need to store subscription in case source already completed
+            subscription.forwardCompletionToSink(completion)
+            subscriber.receive(subscription: subscription)
+            return
+        }
         
         // we use seperate collections for identifiers and subscriptions
         // to improve performance of identifier lookups and to keep the
@@ -107,6 +114,7 @@ extension ReplaySubject: Subject {
     public func send(completion: Subscribers.Completion<Failure>) {
         guard status == .active else { return }
         self.status = .completed
+        self.completion = completion
         subscriptions.forEach { subscription in
             subscription.forwardCompletionToSink(completion)
         }
