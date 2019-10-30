@@ -117,7 +117,6 @@ extension ReplaySubject: Subject {
     
     private func cleanupIfNeeded(){
         if (subscriptions.isEmpty && !keepReplay){
-            status = .active
             completion = nil
             replayValues.clear()
         }
